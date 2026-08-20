@@ -218,6 +218,8 @@ function pickBestDir( g, choices, target ) {
   g.dir = best;
 }
 
+const PEN_EXIT_ROW = 11;
+
 function moveGhost( game, g ) {
   const grid = game.grid;
   const width = grid[ 0 ].length;
@@ -228,6 +230,26 @@ function moveGhost( game, g ) {
       return;
     }
     g.inPen = false;
+    g.exitingPen = true;
+    g.dir = 'up';
+  }
+
+  if ( g.exitingPen ) {
+    if ( aligned( g.x ) && aligned( g.y ) ) {
+      g.x = Math.round( g.x );
+      g.y = Math.round( g.y );
+      if ( g.y <= PEN_EXIT_ROW ) {
+        g.exitingPen = false;
+      } else {
+        g.dir = 'up';
+      }
+    }
+    if ( g.exitingPen ) {
+      const d = DIRS[ g.dir ];
+      g.x += d.x * g.speed;
+      g.y += d.y * g.speed;
+      return;
+    }
   }
 
   if ( aligned( g.x ) && aligned( g.y ) ) {
