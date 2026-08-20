@@ -54,8 +54,9 @@ function createGame() {
   };
 }
 
-function aligned( v ) {
-  return Math.abs( v - Math.round( v ) ) < 1e-6;
+function aligned( v, speed ) {
+  const tolerance = speed ? Math.max( 1e-6, speed * 0.5 ) : 1e-6;
+  return Math.abs( v - Math.round( v ) ) < tolerance;
 }
 
 // Una celda es muro para el actor dado?
@@ -93,7 +94,7 @@ function movePacman( game ) {
   const grid = game.grid;
   const width = grid[ 0 ].length;
 
-  if ( aligned( p.x ) && aligned( p.y ) ) {
+  if ( aligned( p.x, p.speed ) && aligned( p.y, p.speed ) ) {
     p.x = Math.round( p.x );
     p.y = Math.round( p.y );
 
@@ -235,12 +236,12 @@ function moveGhost( game, g ) {
   }
 
   if ( g.exitingPen ) {
-    if ( aligned( g.x ) && aligned( g.y ) ) {
+    if ( aligned( g.x, g.speed ) && aligned( g.y, g.speed ) ) {
       g.x = Math.round( g.x );
       g.y = Math.round( g.y );
       if ( g.y <= PEN_EXIT_ROW ) {
         g.exitingPen = false;
-      } else {
+      } else if ( canMove( grid, g.x, g.y, 'up', 'ghost' ) ) {
         g.dir = 'up';
       }
     }
@@ -252,7 +253,7 @@ function moveGhost( game, g ) {
     }
   }
 
-  if ( aligned( g.x ) && aligned( g.y ) ) {
+  if ( aligned( g.x, g.speed ) && aligned( g.y, g.speed ) ) {
     g.x = Math.round( g.x );
     g.y = Math.round( g.y );
     decideGhost( game, g );
