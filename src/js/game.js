@@ -29,6 +29,10 @@ function createGame() {
     lives: 3,
     dotsRemaining: dots,
     grid,
+    ghostMode: 'scatter',
+    ghostModeTimer: 420,
+    ghostModeSchedule: [ 420, 1200, 420, 1200, 300, 1200, 300, Infinity ],
+    ghostModeIndex: 0,
     pacman: {
       x: PACMAN_START.x,
       y: PACMAN_START.y,
@@ -40,8 +44,11 @@ function createGame() {
       x: g.x,
       y: g.y,
       dir: 'up',
-      speed: GHOST_SPEED,
+      speed: g.speed,
       kind: g.kind,
+      releaseTimer: g.releaseDelay,
+      inPen: g.releaseDelay > 0,
+      scatterTarget: SCATTER_TARGETS[ g.kind ],
     } ) ),
   };
 }
