@@ -183,6 +183,18 @@ function collides( a, b ) {
 }
 
 function update( game ) {
+  // Ghost mode timer (scatter/chase cycles)
+  if ( game.ghostModeTimer > 0 ) {
+    game.ghostModeTimer--;
+    if ( game.ghostModeTimer === 0 ) {
+      game.ghostMode = game.ghostMode === 'scatter' ? 'chase' : 'scatter';
+      game.ghostModeIndex++;
+      if ( game.ghostModeIndex < game.ghostModeSchedule.length ) {
+        game.ghostModeTimer = game.ghostModeSchedule[ game.ghostModeIndex ];
+      }
+    }
+  }
+
   movePacman( game );
   game.ghosts.forEach( ( g ) => moveGhost( game, g ) );
 
