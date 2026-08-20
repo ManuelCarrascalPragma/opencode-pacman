@@ -55,7 +55,7 @@ function createGame() {
 }
 
 function aligned( v ) {
-  return Math.abs( v - Math.round( v ) ) < 1e-3;
+  return Math.abs( v - Math.round( v ) ) < 1e-6;
 }
 
 // Una celda es muro para el actor dado?
