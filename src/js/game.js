@@ -119,7 +119,6 @@ function movePacman( game ) {
 
 function decideGhost( game, g ) {
   const grid = game.grid;
-  const p = game.pacman;
 
   const options = Object.keys( DIRS ).filter(
     ( dir ) => dir !== OPPOSITE[ g.dir ] && canMove( grid, g.x, g.y, dir, 'ghost' )
@@ -127,25 +126,95 @@ function decideGhost( game, g ) {
   // Sin salida (callejon): permitir el giro de 180.
   const choices = options.length ? options : [ '' + OPPOSITE[ g.dir ] ];
 
-  if ( g.kind === 'hunter' ) {
+  const mode = game.ghostMode;
+
+  switch ( g.kind ) {
+    case 'blinky': decideBlinky( game, g, choices, mode ); break;
+    case 'pinky':  decidePinky( game, g, choices, mode ); break;
+    case 'inky':   decideInky( game, g, choices, mode ); break;
+    case 'clyde':  decideClyde( game, g, choices, mode ); break;
+    default: g.dir = choices[ Math.floor( Math.random() * choices.length ) ];
+  }
+}
+
+function decideBlinky( game, g, choices, mode ) {
+  const target = mode === 'scatter' ? g.scatterTarget : { x: Math.round( game.pacman.x ), y: Math.round( game.pacman.y ) };
+  pickBestDir( g, choices, target );
+}
+
+function decidePinky( game, g, choices, mode ) {
+  const p = game.pacman;
+  let target;
+  if ( mode === 'scatter' ) {
+    target = g.scatterTarget;
+  } else {
     const px = Math.round( p.x );
     const py = Math.round( p.y );
-    let best = choices[ 0 ];
-    let bestDist = Infinity;
-    for ( const dir of choices ) {
-      const d = DIRS[ dir ];
-      const nx = g.x + d.x;
-      const ny = g.y + d.y;
-      const dist = Math.abs( nx - px ) + Math.abs( ny - py );
-      if ( dist < bestDist ) {
-        bestDist = dist;
-        best = dir;
-      }
+    const d = DIRS[ p.dir ];
+    target = { x: px + d.x * 4, y: py + d.y * 4 };
+    // Si target es pared, fallback a posicion Pacman
+    if ( isWall( game.grid, target.x, target.y, 'ghost' ) ) {
+      target = { x: px, y: py };
     }
-    g.dir = best;
-  } else {
-    g.dir = choices[ Math.floor( Math.random() * choices.length ) ];
   }
+  pickBestDir( g, choices, target );
+}
+
+function decideInky( game, g, choices, mode ) {
+  let target;
+  if ( mode === 'scatter' ) {
+    target = g.scatterTarget;
+  } else {
+    const p = game.pacman;
+    const px = Math.round( p.x );
+    const py = Math.round( p.y );
+    const blinky = game.ghosts.find( gh => gh.kind === 'blinky' );
+    if ( blinky ) {
+      const bx = Math.round( blinky.x );
+      const by = Math.round( blinky.y );
+      target = { x: 2 * px - bx, y: 2 * py - by };
+    } else {
+      target = { x: px, y: py };
+    }
+  }
+  pickBestDir( g, choices, target );
+}
+
+function decideClyde( game, g, choices, mode ) {
+  let target;
+  if ( mode === 'scatter' ) {
+    target = g.scatterTarget;
+  } else {
+    const p = game.pacman;
+    const px = Math.round( p.x );
+    const py = Math.round( p.y );
+    const gx = Math.round( g.x );
+    const gy = Math.round( g.y );
+    const dist = Math.abs( gx - px ) + Math.abs( gy - py );
+    if ( dist > 8 ) {
+      // Random: pick random valid direction
+      g.dir = choices[ Math.floor( Math.random() * choices.length ) ];
+      return;
+    }
+    target = { x: px, y: py };
+  }
+  pickBestDir( g, choices, target );
+}
+
+function pickBestDir( g, choices, target ) {
+  let best = choices[ 0 ];
+  let bestDist = Infinity;
+  for ( const dir of choices ) {
+    const d = DIRS[ dir ];
+    const nx = g.x + d.x;
+    const ny = g.y + d.y;
+    const dist = Math.abs( nx - target.x ) + Math.abs( ny - target.y );
+    if ( dist < bestDist ) {
+      bestDist = dist;
+      best = dir;
+    }
+  }
+  g.dir = best;
 }
 
 function moveGhost( game, g ) {
