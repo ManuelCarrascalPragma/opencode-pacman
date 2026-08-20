@@ -281,6 +281,7 @@ function resetPositions( game ) {
     g.dir = 'up';
     g.releaseTimer = start.releaseDelay;
     g.inPen = start.releaseDelay > 0;
+    g.exitingPen = false;
   } );
 }
 
