@@ -48,6 +48,7 @@ function createGame() {
       kind: g.kind,
       releaseTimer: g.releaseDelay,
       inPen: g.releaseDelay > 0,
+      exitingPen: false,
       scatterTarget: SCATTER_TARGETS[ g.kind ],
     } ) ),
   };
