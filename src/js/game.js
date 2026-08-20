@@ -152,6 +152,14 @@ function moveGhost( game, g ) {
   const grid = game.grid;
   const width = grid[ 0 ].length;
 
+  if ( g.inPen ) {
+    if ( g.releaseTimer > 0 ) {
+      g.releaseTimer--;
+      return;
+    }
+    g.inPen = false;
+  }
+
   if ( aligned( g.x ) && aligned( g.y ) ) {
     g.x = Math.round( g.x );
     g.y = Math.round( g.y );
