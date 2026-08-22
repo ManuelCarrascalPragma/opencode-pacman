@@ -48,13 +48,15 @@ function createGame() {
       kind: g.kind,
       releaseTimer: g.releaseDelay,
       inPen: g.releaseDelay > 0,
+      exitingPen: false,
       scatterTarget: SCATTER_TARGETS[ g.kind ],
     } ) ),
   };
 }
 
-function aligned( v ) {
-  return Math.abs( v - Math.round( v ) ) < 1e-3;
+function aligned( v, speed ) {
+  const tolerance = speed ? Math.max( 1e-6, speed * 0.5 ) : 1e-6;
+  return Math.abs( v - Math.round( v ) ) < tolerance;
 }
 
 // Una celda es muro para el actor dado?
@@ -92,7 +94,7 @@ function movePacman( game ) {
   const grid = game.grid;
   const width = grid[ 0 ].length;
 
-  if ( aligned( p.x ) && aligned( p.y ) ) {
+  if ( aligned( p.x, p.speed ) && aligned( p.y, p.speed ) ) {
     p.x = Math.round( p.x );
     p.y = Math.round( p.y );
 
@@ -217,6 +219,8 @@ function pickBestDir( g, choices, target ) {
   g.dir = best;
 }
 
+const PEN_EXIT_ROW = 11;
+
 function moveGhost( game, g ) {
   const grid = game.grid;
   const width = grid[ 0 ].length;
@@ -227,9 +231,29 @@ function moveGhost( game, g ) {
       return;
     }
     g.inPen = false;
+    g.exitingPen = true;
+    g.dir = 'up';
   }
 
-  if ( aligned( g.x ) && aligned( g.y ) ) {
+  if ( g.exitingPen ) {
+    if ( aligned( g.x, g.speed ) && aligned( g.y, g.speed ) ) {
+      g.x = Math.round( g.x );
+      g.y = Math.round( g.y );
+      if ( g.y <= PEN_EXIT_ROW ) {
+        g.exitingPen = false;
+      } else if ( canMove( grid, g.x, g.y, 'up', 'ghost' ) ) {
+        g.dir = 'up';
+      }
+    }
+    if ( g.exitingPen ) {
+      const d = DIRS[ g.dir ];
+      g.x += d.x * g.speed;
+      g.y += d.y * g.speed;
+      return;
+    }
+  }
+
+  if ( aligned( g.x, g.speed ) && aligned( g.y, g.speed ) ) {
     g.x = Math.round( g.x );
     g.y = Math.round( g.y );
     decideGhost( game, g );
@@ -258,6 +282,7 @@ function resetPositions( game ) {
     g.dir = 'up';
     g.releaseTimer = start.releaseDelay;
     g.inPen = start.releaseDelay > 0;
+    g.exitingPen = false;
   } );
 }
 
