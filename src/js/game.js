@@ -12,6 +12,13 @@ const OPPOSITE = { left: 'right', right: 'left', up: 'down', down: 'up' };
 
 const PACMAN_SPEED = 0.125; // 1/8 celda/frame -> alinea cada 8 frames
 const GHOST_SPEED = 0.1;    // 1/10 celda/frame
+const FRIGHTENED_SPEED = 0.05;      // half of base ghost speed
+const EYES_SPEED = 0.2;             // double speed returning to pen
+const RESPAWN_DELAY = 240;          // 4s at 60fps
+const FRIGHTENED_DURATION = 600;    // ~10s at 60fps
+const FRIGHTENED_FLASH_START = 120; // last 2s: flash white/blue
+const PEN_CENTER = { x: 13.5, y: 14.5 }; // approximate pen center for eyes target
+const EATEN_GHOST_SCORES = [200, 400, 800, 1600];
 
 // Crea una partida nueva. Copia MAZE (pristino) a game.grid para poder comer
 // dots sin destruir el original, y reiniciar.
@@ -33,6 +40,9 @@ function createGame() {
     ghostModeTimer: 420,
     ghostModeSchedule: [ 420, 1200, 420, 1200, 300, 1200, 300, Infinity ],
     ghostModeIndex: 0,
+    frightenedMode: false,
+    frightenedTimer: 0,
+    ghostsEatenThisFrightened: 0,
     pacman: {
       x: PACMAN_START.x,
       y: PACMAN_START.y,
@@ -45,11 +55,16 @@ function createGame() {
       y: g.y,
       dir: 'up',
       speed: g.speed,
+      baseSpeed: g.speed,
       kind: g.kind,
       releaseTimer: g.releaseDelay,
       inPen: g.releaseDelay > 0,
       exitingPen: false,
       scatterTarget: SCATTER_TARGETS[ g.kind ],
+      frightened: false,
+      eaten: false,
+      eyesOnly: false,
+      respawnTimer: 0,
     } ) ),
   };
 }
@@ -62,11 +77,12 @@ function aligned( v, speed ) {
 // Una celda es muro para el actor dado?
 //   pacman: bloqueado por pared (1) y puerta (3)
 //   ghost:  bloqueado solo por pared (1)
+//   eyes:   no bloqueado por nada (vuelve al pen ignorando paredes)
 function isWall( grid, x, y, actor ) {
   if ( y < 0 || y >= grid.length ) return true;
   if ( x < 0 || x >= grid[ 0 ].length ) return true;
   const v = grid[ y ][ x ];
-  if ( v === 1 ) return true;
+  if ( v === 1 && actor !== 'eyes' ) return true;
   if ( v === 3 && actor === 'pacman' ) return true;
   return false;
 }
@@ -89,6 +105,29 @@ function wrapTunnel( a, width ) {
   }
 }
 
+function enterFrightenedMode( game ) {
+  game.frightenedMode = true;
+  game.frightenedTimer = FRIGHTENED_DURATION;
+  game.ghostsEatenThisFrightened = 0;
+  for ( const g of game.ghosts ) {
+    if ( !g.eaten ) {
+      g.frightened = true;
+      g.speed = FRIGHTENED_SPEED;
+      g.dir = OPPOSITE[ g.dir ];
+    }
+  }
+}
+
+function exitFrightenedMode( game ) {
+  game.frightenedMode = false;
+  for ( const g of game.ghosts ) {
+    if ( g.frightened && !g.eaten ) {
+      g.frightened = false;
+      g.speed = g.baseSpeed;
+    }
+  }
+}
+
 function movePacman( game ) {
   const p = game.pacman;
   const grid = game.grid;
@@ -104,10 +143,16 @@ function movePacman( game ) {
       p.nextDir = null;
     }
     // Comer dot.
-    if ( grid[ p.y ][ p.x ] === 2 ) {
+    const tile = grid[ p.y ][ p.x ];
+    if ( tile === 2 ) {
       grid[ p.y ][ p.x ] = 0;
       game.score += 10;
       game.dotsRemaining--;
+    } else if ( tile === 4 ) {
+      // Power Pellet
+      grid[ p.y ][ p.x ] = 0;
+      game.score += 50;
+      enterFrightenedMode( game );
     }
     // Si no puede seguir, se detiene en la celda.
     if ( !canMove( grid, p.x, p.y, p.dir, 'pacman' ) ) return;
@@ -122,13 +167,27 @@ function movePacman( game ) {
 function decideGhost( game, g ) {
   const grid = game.grid;
 
+  // For eaten ghosts (eyes), use 'eyes' actor to ignore walls
+  const actor = g.eaten ? 'eyes' : 'ghost';
   const options = Object.keys( DIRS ).filter(
-    ( dir ) => dir !== OPPOSITE[ g.dir ] && canMove( grid, g.x, g.y, dir, 'ghost' )
+    ( dir ) => dir !== OPPOSITE[ g.dir ] && canMove( grid, g.x, g.y, dir, actor )
   );
   // Sin salida (callejon): permitir el giro de 180.
   const choices = options.length ? options : [ '' + OPPOSITE[ g.dir ] ];
 
   const mode = game.ghostMode;
+
+  // Frightened ghosts flee from Pac-Man
+  if ( g.frightened && !g.eaten ) {
+    decideFrightened( game, g, choices );
+    return;
+  }
+
+  // Eaten ghosts (eyes) return to pen center
+  if ( g.eaten ) {
+    decideEyes( game, g, choices );
+    return;
+  }
 
   switch ( g.kind ) {
     case 'blinky': decideBlinky( game, g, choices, mode ); break;
@@ -136,6 +195,49 @@ function decideGhost( game, g ) {
     case 'inky':   decideInky( game, g, choices, mode ); break;
     case 'clyde':  decideClyde( game, g, choices, mode ); break;
     default: g.dir = choices[ Math.floor( Math.random() * choices.length ) ];
+  }
+}
+
+function decideFrightened( game, g, choices ) {
+  const px = Math.round( game.pacman.x );
+  const py = Math.round( game.pacman.y );
+  // Flee: maximize distance to Pac-Man
+  let best = choices[ 0 ];
+  let bestDist = -1;
+  for ( const dir of choices ) {
+    const d = DIRS[ dir ];
+    const nx = g.x + d.x;
+    const ny = g.y + d.y;
+    const dist = Math.abs( nx - px ) + Math.abs( ny - py );
+    if ( dist > bestDist ) {
+      bestDist = dist;
+      best = dir;
+    }
+  }
+  g.dir = best;
+}
+
+function decideEyes( game, g, choices ) {
+  // Target pen center
+  const target = PEN_CENTER;
+  pickBestDir( g, choices, target );
+  // Check if close enough to pen center to trigger respawn
+  // Use actual position (before rounding) with larger threshold since
+  // rounded position will be at integer coords while target is at .5
+  const dist = Math.abs( g.x - target.x ) + Math.abs( g.y - target.y );
+  if ( dist < 1.0 ) {
+    // Enter pen respawn sequence: wait RESPAWN_DELAY then exit up
+    g.eaten = false;
+    g.eyesOnly = false;
+    g.inPen = true;
+    g.releaseTimer = RESPAWN_DELAY;
+    g.exitingPen = false;
+    g.dir = 'up';
+    g.speed = g.baseSpeed;
+    g.frightened = false;
+    // Snap to pen center for clean exit
+    g.x = target.x;
+    g.y = target.y;
   }
 }
 
@@ -225,6 +327,49 @@ function moveGhost( game, g ) {
   const grid = game.grid;
   const width = grid[ 0 ].length;
 
+  // Handle eaten ghost (eyes returning to pen)
+  if ( g.eaten ) {
+    // Eyes move at double speed, ignore walls
+    if ( aligned( g.x, g.speed ) && aligned( g.y, g.speed ) ) {
+      g.x = Math.round( g.x );
+      g.y = Math.round( g.y );
+      decideGhost( game, g );
+      // If decideGhost cleared eaten state (reached pen), fall through to normal logic
+      if ( !g.eaten ) {
+        // continue to inPen/exitingPen logic below
+      } else {
+        if ( !canMove( grid, g.x, g.y, g.dir, 'eyes' ) ) return;
+        const d = DIRS[ g.dir ];
+        g.x += d.x * g.speed;
+        g.y += d.y * g.speed;
+        wrapTunnel( g, width );
+        return;
+      }
+    } else {
+      const d = DIRS[ g.dir ];
+      g.x += d.x * g.speed;
+      g.y += d.y * g.speed;
+      wrapTunnel( g, width );
+      // Check if close to pen center even when not aligned (EYES_SPEED=0.2 never aligns at .5 coords)
+      const dist = Math.abs( g.x - PEN_CENTER.x ) + Math.abs( g.y - PEN_CENTER.y );
+      if ( dist < 1.0 && g.inPen === false ) {
+        // Snap to pen center and trigger respawn (only if not already inPen)
+        g.eaten = false;
+        g.eyesOnly = false;
+        g.inPen = true;
+        g.releaseTimer = RESPAWN_DELAY;
+        g.exitingPen = false;
+        g.dir = 'up';
+        g.speed = g.baseSpeed;
+        g.frightened = false;
+        // Start at pen center (inside the pen)
+        g.x = Math.round( PEN_CENTER.x );
+        g.y = Math.round( PEN_CENTER.y );
+      }
+      return;
+    }
+  }
+
   if ( g.inPen ) {
     if ( g.releaseTimer > 0 ) {
       g.releaseTimer--;
@@ -275,6 +420,9 @@ function resetPositions( game ) {
   game.ghostMode = 'scatter';
   game.ghostModeIndex = 0;
   game.ghostModeTimer = game.ghostModeSchedule[ 0 ];
+  game.frightenedMode = false;
+  game.frightenedTimer = 0;
+  game.ghostsEatenThisFrightened = 0;
   game.ghosts.forEach( ( g, i ) => {
     const start = GHOST_STARTS[ i ];
     g.x = start.x;
@@ -283,6 +431,11 @@ function resetPositions( game ) {
     g.releaseTimer = start.releaseDelay;
     g.inPen = start.releaseDelay > 0;
     g.exitingPen = false;
+    g.frightened = false;
+    g.eaten = false;
+    g.eyesOnly = false;
+    g.respawnTimer = 0;
+    g.speed = g.baseSpeed;
   } );
 }
 
@@ -303,18 +456,40 @@ function update( game ) {
     }
   }
 
+  // Frightened mode timer
+  if ( game.frightenedTimer > 0 ) {
+    game.frightenedTimer--;
+    if ( game.frightenedTimer === 0 ) {
+      exitFrightenedMode( game );
+    }
+  }
+
   movePacman( game );
   game.ghosts.forEach( ( g ) => moveGhost( game, g ) );
 
   for ( const g of game.ghosts ) {
     if ( collides( game.pacman, g ) ) {
-      game.lives--;
-      if ( game.lives <= 0 ) {
-        game.state = 'lost';
-        return;
+      if ( g.frightened && !g.eaten ) {
+        // Pac-Man eats frightened ghost
+        g.eaten = true;
+        g.eyesOnly = true;
+        g.frightened = false;
+        g.speed = EYES_SPEED;
+        // Score: escalating 200, 400, 800, 1600
+        const idx = Math.min( game.ghostsEatenThisFrightened, EATEN_GHOST_SCORES.length - 1 );
+        game.score += EATEN_GHOST_SCORES[ idx ];
+        game.ghostsEatenThisFrightened++;
+      } else if ( !g.eaten ) {
+        // Normal collision: lose life
+        game.lives--;
+        if ( game.lives <= 0 ) {
+          game.state = 'lost';
+          return;
+        }
+        resetPositions( game );
+        break;
       }
-      resetPositions( game );
-      break;
+      // If g.eaten (eyes only), no collision
     }
   }
 
